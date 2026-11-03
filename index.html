@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PUBG Flash Launch</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b0f">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<style>
+:root { --bg:#0b0b0f; --card:#17171f; --fg:#f5f5f7; --dim:#9a9aa6; --accent:#ffb400; box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px); color-scheme:dark; }
+* { box-sizing:border-box; }
+html, body { margin:0; background:var(--bg); color:var(--fg); font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+main { max-width:520px; margin:0 auto; padding:24px 18px 32px; text-align:center; }
+h1 { font-size:22px; margin:8px 0 2px; }
+.sub { color:var(--dim); font-size:14px; margin:0 0 22px; }
+.grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+.box { background:var(--card); border-radius:14px; padding:16px 4px; }
+.num { font-size:clamp(28px,9vw,44px); font-weight:700; font-variant-numeric:tabular-nums; color:var(--accent); }
+.lbl { font-size:12px; color:var(--dim); margin-top:4px; text-transform:uppercase; letter-spacing:.06em; }
+.status { margin:20px 0 6px; font-size:15px; }
+.info { background:var(--card); border-radius:14px; padding:14px; margin:18px 0; text-align:left; font-size:14px; line-height:1.45; color:var(--dim); }
+.info b { color:var(--fg); }
+button, a.btn { display:block; width:100%; padding:14px; margin:10px 0; border:0; border-radius:12px; font-size:16px; font-weight:600; text-decoration:none; text-align:center; cursor:pointer; }
+.primary { background:var(--accent); color:#111; }
+.secondary { background:var(--card); color:var(--fg); }
+#out { display:none; background:#2a1010; border:2px solid #ff4d4d; border-radius:14px; padding:18px; margin:0 0 18px; }
+#out h2 { margin:0 0 6px; font-size:24px; color:#ff6b6b; }
+#out button { background:#ff4d4d; color:#fff; }
+</style>
+</head>
+<body>
+<main>
+  <h1>⚡ PUBG Flash Launch</h1>
+  <p class="sub" id="when">Loading launch info…</p>
+
+  <div id="out">
+    <h2>PUBG Flash is out!</h2>
+    <div>Tap below to stop the alarm.</div>
+    <button id="stop">Stop alarm</button>
+  </div>
+
+  <div class="grid">
+    <div class="box"><div class="num" id="d">--</div><div class="lbl">Days</div></div>
+    <div class="box"><div class="num" id="h">--</div><div class="lbl">Hours</div></div>
+    <div class="box"><div class="num" id="m">--</div><div class="lbl">Minutes</div></div>
+    <div class="box"><div class="num" id="s">--</div><div class="lbl">Seconds</div></div>
+  </div>
+  <div class="status" id="status"></div>
+
+  <div class="info" id="info">Checking the internet for the latest launch info…</div>
+
+  <a class="btn primary" id="play" href="https://play.google.com/store/apps/details?id=com.tencent.igfit" target="_blank" rel="noopener">Open on Google Play</a>
+  <button class="secondary" id="notif">Turn on notifications</button>
+</main>
+<script>
+var CFG = { launchDate:"2026-11-13T00:00:00", confirmed:false, headline:"", notes:"", updated:"", playUrl:"https://play.google.com/store/apps/details?id=com.tencent.igfit" };
+var target = new Date(CFG.launchDate);
+var ALARM_H = 14, ALARM_M = 30;
+var audioCtx = null, alarmTimer = null, notified = false;
+
+function $(id){ return document.getElementById(id); }
+function pad(n){ return n < 10 ? "0" + n : "" + n; }
+function store(k, v){ try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch(e){} return null; }
+
+function loadInfo() {
+  fetch("launch.json?t=" + Date.now(), { cache:"no-store" })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      CFG = Object.assign(CFG, j);
+      target = new Date(CFG.launchDate);
+      $("play").href = CFG.playUrl;
+      $("info").innerHTML = "<b>" + (CFG.headline || "Launch info") + "</b><br>" + (CFG.notes || "") + (CFG.updated ? "<br><br>Last updated: " + CFG.updated : "");
+      render();
+    })
+    .catch(function(){
+      $("info").textContent = "Couldn't reach the internet. Showing the last known launch date.";
+    });
+}
+
+function render() {
+  var opts = { weekday:"long", year:"numeric", month:"long", day:"numeric" };
+  $("when").textContent = "Launch: " + target.toLocaleDateString(undefined, opts) + (CFG.confirmed ? "" : " (not yet confirmed)");
+}
+
+function launchedState() { return Date.now() >= target.getTime(); }
+
+function alarmDue() {
+  var t = new Date(target.getTime());
+  t.setHours(ALARM_H, ALARM_M, 0, 0);
+  return Date.now() >= t.getTime();
+}
+
+function beep() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = "square"; o.frequency.value = 880;
+    g.gain.value = 0.25;
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + 0.25);
+  } catch(e){}
+  if (navigator.vibrate) navigator.vibrate([300,150,300]);
+}
+
+function startAlarm() {
+  if (alarmTimer) return;
+  $("out").style.display = "block";
+  beep();
+  alarmTimer = setInterval(beep, 700);
+  speak();
+}
+function speak() {
+  try {
+    if (window.speechSynthesis) {
+      var u = new SpeechSynthesisUtterance("PUBG Flash is out");
+      window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
+    }
+  } catch(e){}
+}
+function stopAlarm() {
+  if (alarmTimer) { clearInterval(alarmTimer); alarmTimer = null; }
+  try { window.speechSynthesis.cancel(); } catch(e){}
+  store("ack", String(target.getTime()));
+  $("out").style.display = "none";
+}
+$("stop").onclick = stopAlarm;
+
+function notifyOut() {
+  if (notified) return; notified = true;
+  try {
+    if ("Notification" in window && Notification.permission === "granted") {
+      var n = new Notification("PUBG Flash is out!", { body:"Tap to open the app.", icon:"icon-192.png" });
+      n.onclick = function(){ store("ack", String(target.getTime())); window.focus(); $("out").style.display = "none"; };
+    }
+  } catch(e){}
+}
+
+$("notif").onclick = function() {
+  try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); } catch(e){}
+  if (!("Notification" in window)) { $("notif").textContent = "Notifications not supported"; return; }
+  Notification.requestPermission().then(function(p){
+    $("notif").textContent = p === "granted" ? "Notifications are on ✓" : "Notifications blocked";
+  });
+};
+
+function tick() {
+  var diff = target.getTime() - Date.now();
+  if (diff <= 0) {
+    $("d").textContent = $("h").textContent = $("m").textContent = $("s").textContent = "00";
+    $("status").textContent = "PUBG Flash launch time has arrived!";
+    notifyOut();
+    if (store("ack") !== String(target.getTime()) && alarmDue()) startAlarm();
+    else if (store("ack") !== String(target.getTime())) $("out").style.display = "block";
+    return;
+  }
+  var s = Math.floor(diff / 1000);
+  $("d").textContent = Math.floor(s / 86400);
+  $("h").textContent = pad(Math.floor(s % 86400 / 3600));
+  $("m").textContent = pad(Math.floor(s % 3600 / 60));
+  $("s").textContent = pad(s % 60);
+  $("status").textContent = "Time left until launch";
+}
+
+if ("Notification" in window && Notification.permission === "granted") $("notif").textContent = "Notifications are on ✓";
+render(); tick(); loadInfo();
+setInterval(tick, 1000);
+setInterval(loadInfo, 600000);
+if ("serviceWorker" in navigator) { navigator.serviceWorker.register("sw.js").catch(function(){}); }
+</script>
+</body>
+</html>
